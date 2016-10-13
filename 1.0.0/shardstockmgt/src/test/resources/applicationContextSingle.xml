@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<beans xmlns="http://www.springframework.org/schema/beans"
+       xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+       xsi:schemaLocation="http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans.xsd">
+	<bean id="jedisDataManager" class="org.wispersd.core.data.nosql.redis.impl.JedisDataManagerImpl" init-method="init"  destroy-method="destroy">
+		<property name="configFileName" value="jedisconfigsingle.properties"/>
+	</bean>
+	
+	<bean id="redisStockOperationTemplate" class="org.wispersd.ordermanagement.sourcing.stock.impl.RedisStockOperationTemplate">
+	</bean>
+	
+	<bean id="singleStockManager" class="org.wispersd.ordermanagement.sourcing.stock.impl.RedisStockManagerImpl">
+		<property name="jedisDataManager" ref="jedisDataManager"/>
+		<property name="redisStockOperationTemplate" ref="redisStockOperationTemplate"/>
+	</bean>
+</beans>

@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<beans xmlns="http://www.springframework.org/schema/beans"
+       xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+       xsi:schemaLocation="http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans.xsd">
+	<bean id="jedisDataManager" class="org.wispersd.core.data.nosql.redis.impl.JedisDataManagerImpl" init-method="init"  destroy-method="destroy">
+		<property name="configFileName" value="jedisconfigshard.properties"/>
+	</bean>
+	
+	<bean id="redisStockOperationTemplate" class="org.wispersd.ordermanagement.sourcing.stock.impl.RedisStockOperationTemplate">
+	</bean>
+	
+	<bean id="shardedStockManager" class="org.wispersd.ordermanagement.sourcing.stock.impl.ShardedRedisStockManagerImpl">
+		<property name="jedisDataManager" ref="jedisDataManager"/>
+		<property name="redisStockOperationTemplate" ref="redisStockOperationTemplate"/>
+		<property name="executorService">
+			<bean class="java.util.concurrent.ThreadPoolExecutor">
+				<constructor-arg index="0" type="int" value="10"></constructor-arg>
+				<constructor-arg index="1" type="int" value="10"></constructor-arg>
+				<constructor-arg index="2" type="long" value="1500"></constructor-arg>
+				<constructor-arg index="3" type="java.util.concurrent.TimeUnit" value="MILLISECONDS"></constructor-arg>
+				<constructor-arg index="4" type="java.util.concurrent.BlockingQueue">
+					<bean class="java.util.concurrent.ArrayBlockingQueue">
+						<constructor-arg index="0" value="500"></constructor-arg>
+					</bean>
+				</constructor-arg>
+			</bean>
+		</property>	
+	</bean>
+</beans>
