@@ -119,6 +119,34 @@ public class RedisStockManagerImpl implements StockManager
 	}
 
 
+
+	@Override
+	public void updateStockLevelData(final UpdateStockLevelRequest stockLevelReq)
+	{
+		if (logger.isDebugEnabled())
+		{
+			logger.debug("Update Stock Level Request is: " + stockLevelReq);
+		}
+		final JedisCommands jedis = jedisDataManager.getJedisByTableName(TABLENAME);
+		try
+		{
+			if (jedis instanceof Jedis)
+			{
+				redisStockOperationTemplate.updateStockLevelData((Jedis) jedis, stockLevelReq);
+			}
+			else
+			{
+				throw new RuntimeException("Not a simple jedis");
+			}
+		}
+		finally
+		{
+			JedisUtils.closeJedis(jedis);
+		}
+	}
+
+
+
 	@Override
 	public boolean reserveAllQuantities(final ReserveStockLevelRequest stockLevelReq)
 	{
@@ -397,5 +425,54 @@ public class RedisStockManagerImpl implements StockManager
 		}
 	}
 
+	@Override
+	public MultiGetQuantityResponse getAllQuantities(final LocationProducts locProds)
+	{
+		if (logger.isDebugEnabled())
+		{
+			logger.debug("Get all quantity request is: " + locProds);
+		}
+		final JedisCommands jedis = jedisDataManager.getJedisByTableName(TABLENAME);
+		try
+		{
+			if (jedis instanceof Jedis)
+			{
+				return redisStockOperationTemplate.getAllQuantities((Jedis) jedis, locProds);
+			}
+			else
+			{
+				throw new RuntimeException("Not a simple jedis");
+			}
+		}
+		finally
+		{
+			JedisUtils.closeJedis(jedis);
+		}
+	}
+
+	@Override
+	public int[] getAllQuantities(final String locationId, final String prodCode)
+	{
+		if (logger.isDebugEnabled())
+		{
+			logger.debug("Get all quantity request, location id: " + locationId + " product code: " + prodCode);
+		}
+		final JedisCommands jedis = jedisDataManager.getJedisByTableName(TABLENAME);
+		try
+		{
+			if (jedis instanceof Jedis)
+			{
+				return redisStockOperationTemplate.getAllQuantity(jedis, locationId, prodCode);
+			}
+			else
+			{
+				throw new RuntimeException("Not a simple jedis");
+			}
+		}
+		finally
+		{
+			JedisUtils.closeJedis(jedis);
+		}
+	}
 
 }

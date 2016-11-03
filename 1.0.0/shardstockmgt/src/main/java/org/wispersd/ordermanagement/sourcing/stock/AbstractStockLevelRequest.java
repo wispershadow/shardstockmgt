@@ -17,6 +17,7 @@ import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.TreeMap;
 
 import org.wispersd.ordermanagement.sourcing.stock.impl.StockRowIterator;
 
@@ -26,7 +27,17 @@ import org.wispersd.ordermanagement.sourcing.stock.impl.StockRowIterator;
  */
 public class AbstractStockLevelRequest<T>
 {
-	private final Map<String, Map<String, T>> reqMap = new HashMap<String, Map<String, T>>();
+	private final Map<String, Map<String, T>> reqMap = new TreeMap<String, Map<String, T>>();
+
+	public boolean isEmpty()
+	{
+		return reqMap.isEmpty();
+	}
+
+	public void clear()
+	{
+		reqMap.clear();
+	}
 
 	public void addStockLevel(final String locationId, final String prodCode, final T data)
 	{

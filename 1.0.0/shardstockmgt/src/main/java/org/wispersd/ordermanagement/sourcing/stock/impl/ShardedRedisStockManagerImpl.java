@@ -760,7 +760,7 @@ public class ShardedRedisStockManagerImpl implements StockManager
 		final JedisCommands jedis = jedisDataManager.getJedisByTableName(TABLENAME);
 		try
 		{
-			if (jedis instanceof Jedis)
+			if (jedis instanceof ShardedJedis)
 			{
 				return redisStockOperationTemplate.getInstockQuantity(jedis, locationId, prodCode);
 			}
@@ -785,7 +785,7 @@ public class ShardedRedisStockManagerImpl implements StockManager
 		final JedisCommands jedis = jedisDataManager.getJedisByTableName(TABLENAME);
 		try
 		{
-			if (jedis instanceof Jedis)
+			if (jedis instanceof ShardedJedis)
 			{
 				return redisStockOperationTemplate.getReservedQuantity(jedis, locationId, prodCode);
 			}
@@ -810,7 +810,7 @@ public class ShardedRedisStockManagerImpl implements StockManager
 		final JedisCommands jedis = jedisDataManager.getJedisByTableName(TABLENAME);
 		try
 		{
-			if (jedis instanceof Jedis)
+			if (jedis instanceof ShardedJedis)
 			{
 				return redisStockOperationTemplate.getAvailableQuantity(jedis, locationId, prodCode);
 			}
