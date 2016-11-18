@@ -23,6 +23,8 @@ public interface StockManager
 
 	public void addStockLevelData(final AddStockLevelRequest stockLevelReq);
 
+	public void updateStockLevelData(final UpdateStockLevelRequest stockLevelReq);
+
 	public boolean reserveAllQuantities(final ReserveStockLevelRequest stockLevelReq);
 
 	public ReserveStockLevelResponse reservePartialQuantities(final ReserveStockLevelRequest stockLevelReq);
@@ -39,9 +41,13 @@ public interface StockManager
 
 	public GetQuantityResponse getAvailableQuantities(LocationProducts locProds);
 
+	public MultiGetQuantityResponse getAllQuantities(LocationProducts locProds);
+
 	public int getInstockQuantity(final String locationId, final String prodCode);
 
 	public int getReservedQuantity(final String locationId, final String prodCode);
 
 	public int getAvailableQuantity(final String locationId, final String prodCode);
+
+	public int[] getAllQuantities(final String locationId, final String prodCode);
 }

@@ -29,6 +29,11 @@ public class AbstractStockLevelRequest<T>
 {
 	private final Map<String, Map<String, T>> reqMap = new TreeMap<String, Map<String, T>>();
 
+	public int size()
+	{
+		return reqMap.size();
+	}
+
 	public boolean isEmpty()
 	{
 		return reqMap.isEmpty();

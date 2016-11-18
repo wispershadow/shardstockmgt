@@ -11,29 +11,37 @@
  */
 package org.wispersd.ordermanagement.sourcing.stock.impl;
 
+import java.util.ArrayList;
 import java.util.Collection;
-import java.util.Map;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicInteger;
+import java.util.List;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.wispersd.core.data.nosql.redis.JedisDataManager;
 import org.wispersd.core.data.nosql.redis.JedisUtils;
-import org.wispersd.ordermanagement.sourcing.stock.AbstractStockLevelRequest;
 import org.wispersd.ordermanagement.sourcing.stock.AddStockLevelRequest;
 import org.wispersd.ordermanagement.sourcing.stock.CommitStockLevelRequest;
 import org.wispersd.ordermanagement.sourcing.stock.CommitStockLevelResponse;
 import org.wispersd.ordermanagement.sourcing.stock.GetQuantityResponse;
 import org.wispersd.ordermanagement.sourcing.stock.LocationProducts;
+import org.wispersd.ordermanagement.sourcing.stock.MultiGetQuantityResponse;
 import org.wispersd.ordermanagement.sourcing.stock.ReserveStockLevelRequest;
 import org.wispersd.ordermanagement.sourcing.stock.ReserveStockLevelResponse;
 import org.wispersd.ordermanagement.sourcing.stock.RollbackStockLevelRequest;
-import org.wispersd.ordermanagement.sourcing.stock.ShardStockUtils;
 import org.wispersd.ordermanagement.sourcing.stock.StockManager;
-import org.wispersd.ordermanagement.sourcing.stock.StockQuantities;
+import org.wispersd.ordermanagement.sourcing.stock.UpdateStockLevelRequest;
+import org.wispersd.ordermanagement.sourcing.stock.impl.tasks.AddStockLevelTask;
+import org.wispersd.ordermanagement.sourcing.stock.impl.tasks.CommitAllQtyTask;
+import org.wispersd.ordermanagement.sourcing.stock.impl.tasks.CommitPartialQtyTask;
+import org.wispersd.ordermanagement.sourcing.stock.impl.tasks.GetAllQtyTask;
+import org.wispersd.ordermanagement.sourcing.stock.impl.tasks.GetAvailableQtyTask;
+import org.wispersd.ordermanagement.sourcing.stock.impl.tasks.GetInstockQtyTask;
+import org.wispersd.ordermanagement.sourcing.stock.impl.tasks.GetReservedQtyTask;
+import org.wispersd.ordermanagement.sourcing.stock.impl.tasks.ReserveAllQtyTask;
+import org.wispersd.ordermanagement.sourcing.stock.impl.tasks.ReservePartialQtyTask;
+import org.wispersd.ordermanagement.sourcing.stock.impl.tasks.RollbackStockLevelTask;
+import org.wispersd.ordermanagement.sourcing.stock.impl.tasks.TaskExecutionStrategy;
+import org.wispersd.ordermanagement.sourcing.stock.impl.tasks.UpdateStockLevelTask;
 
 import redis.clients.jedis.Jedis;
 import redis.clients.jedis.JedisCommands;
@@ -49,7 +57,8 @@ public class ShardedRedisStockManagerImpl implements StockManager
 	private JedisDataManager jedisDataManager;
 	private static final String TABLENAME = "stock";
 	private RedisStockOperationTemplate redisStockOperationTemplate;
-	private ExecutorService executorService;
+	private TaskExecutionStrategy taskExecutionStrategy;
+	private int maxSplitSize = 500;
 
 	/**
 	 * @return the jedisDataManager
@@ -85,17 +94,43 @@ public class ShardedRedisStockManagerImpl implements StockManager
 	{
 		this.redisStockOperationTemplate = redisStockOperationTemplate;
 	}
-	
-	
-	public ExecutorService getExecutorService() {
-		return executorService;
+
+	/**
+	 * @return the taskExecutionStrategy
+	 */
+	public TaskExecutionStrategy getTaskExecutionStrategy()
+	{
+		return taskExecutionStrategy;
 	}
 
-	public void setExecutorService(ExecutorService executorService) {
-		this.executorService = executorService;
+	/**
+	 * @param taskExecutionStrategy
+	 *           the taskExecutionStrategy to set
+	 */
+	public void setTaskExecutionStrategy(final TaskExecutionStrategy taskExecutionStrategy)
+	{
+		this.taskExecutionStrategy = taskExecutionStrategy;
 	}
 
-	@Override
+
+	/**
+	 * @return the maxSplitSize
+	 */
+	public int getMaxSplitSize()
+	{
+		return maxSplitSize;
+	}
+
+	/**
+	 * @param maxSplitSize
+	 *           the maxSplitSize to set
+	 */
+	public void setMaxSplitSize(final int maxSplitSize)
+	{
+		this.maxSplitSize = maxSplitSize;
+	}
+
+	
 	public void clearAllStockData()
 	{
 		final JedisCommands jedis = jedisDataManager.getJedisByTableName(TABLENAME);
@@ -118,7 +153,7 @@ public class ShardedRedisStockManagerImpl implements StockManager
 
 	}
 
-	@Override
+	
 	public void addStockLevelData(final AddStockLevelRequest stockLevelReq)
 	{
 		if (logger.isDebugEnabled())
@@ -128,49 +163,9 @@ public class ShardedRedisStockManagerImpl implements StockManager
 		final JedisCommands jedis = jedisDataManager.getJedisByTableName(TABLENAME);
 		try
 		{
-			if (jedis instanceof ShardedJedis)
-			{
-				final Map<Jedis, ? extends AbstractStockLevelRequest<StockQuantities>> splitRes = ShardStockUtils
-						.splitRequestByShard(stockLevelReq, (ShardedJedis) jedis);
-				final CountDownLatch countdownLatch = new CountDownLatch(splitRes.size());
-				for (final Jedis nextShard : splitRes.keySet())
-				{
-					final Runnable r = new Runnable()
-					{
-
-						@Override
-						public void run()
-						{
-							try {
-								final AddStockLevelRequest reqPerShard = (AddStockLevelRequest) splitRes.get(nextShard);
-								if (logger.isDebugEnabled())
-								{
-									logger.debug("Add Stock level request for shard: " + nextShard + " is: " + reqPerShard);
-								}
-								redisStockOperationTemplate.addStockLevelData(nextShard, reqPerShard);
-							}
-							catch (final Exception e)
-							{
-								logger.error("Error trying to add stock level: ", e);
-							}
-							countdownLatch.countDown();
-						}
-					};
-					executorService.submit(r);
-				}
-				try
-				{
-					countdownLatch.await();
-				}
-				catch (final InterruptedException e)
-				{
-					logger.warn("Thread execution interruptted");
-				}
-			}
-			else
-			{
-				throw new RuntimeException("Not a sharded jedis");
-			}
+			final AddStockLevelTask addStockLevelTask = new AddStockLevelTask(taskExecutionStrategy, jedis, stockLevelReq,
+					redisStockOperationTemplate, true, maxSplitSize);
+			addStockLevelTask.run();
 		}
 		finally
 		{
@@ -178,7 +173,27 @@ public class ShardedRedisStockManagerImpl implements StockManager
 		}
 	}
 
-	@Override
+	
+	public void updateStockLevelData(final UpdateStockLevelRequest stockLevelReq)
+	{
+		if (logger.isDebugEnabled())
+		{
+			logger.debug("Update Stock Level Request is: " + stockLevelReq);
+		}
+		final JedisCommands jedis = jedisDataManager.getJedisByTableName(TABLENAME);
+		try
+		{
+			final UpdateStockLevelTask updateStockLevelTask = new UpdateStockLevelTask(taskExecutionStrategy, jedis, stockLevelReq,
+					redisStockOperationTemplate, true, maxSplitSize);
+			updateStockLevelTask.run();
+		}
+		finally
+		{
+			JedisUtils.closeJedis(jedis);
+		}
+	}
+
+	
 	public boolean reserveAllQuantities(final ReserveStockLevelRequest stockLevelReq)
 	{
 		if (logger.isDebugEnabled())
@@ -188,116 +203,22 @@ public class ShardedRedisStockManagerImpl implements StockManager
 		final JedisCommands jedis = jedisDataManager.getJedisByTableName(TABLENAME);
 		try
 		{
-			if (jedis instanceof ShardedJedis)
+			final ReserveAllQtyTask reserveAllQtyTask = new ReserveAllQtyTask(taskExecutionStrategy, jedis, stockLevelReq,
+					redisStockOperationTemplate, false, maxSplitSize);
+			final List<Object> reserveRes = reserveAllQtyTask.call();
+			final List<Object> toRollback = new ArrayList<Object>();
+			final boolean needRollback = filterRollbackTasks(reserveRes, toRollback);
+			if (needRollback)
 			{
-				final Map<Jedis, ? extends AbstractStockLevelRequest<Integer>> splitRes = ShardStockUtils.splitRequestByShard(
-						stockLevelReq, (ShardedJedis) jedis);
-				final CountDownLatch countdownLatch1 = new CountDownLatch(splitRes.size());
-				final Object[][] tempRes = new Object[splitRes.size()][3];
-				final AtomicInteger countSuccess = new AtomicInteger(0);
-				final AtomicBoolean toRollback = new AtomicBoolean(false);
-				int ind = 0;
-				for (final Jedis nextShard : splitRes.keySet())
+				for (final Object nextToRollback : toRollback)
 				{
-					final int i = ind;
-					final Runnable r = new Runnable()
-					{
-						@Override
-						public void run()
-						{
-							final ReserveStockLevelRequest reqPerShard = (ReserveStockLevelRequest) splitRes.get(nextShard);
-							if (logger.isDebugEnabled())
-							{
-								logger.debug("Reserve Stock level request for shard: " + nextShard + " is: " + reqPerShard);
-							}
-							try {
-								
-								final boolean opRes = redisStockOperationTemplate.reserveAllQuantities(nextShard, reqPerShard);
-								if (!opRes)
-								{
-									toRollback.set(true);
-								}
-								else
-								{
-									countSuccess.incrementAndGet();
-								}
-								tempRes[i][0] = nextShard;
-								tempRes[i][1] = reqPerShard;
-								tempRes[i][2] = Boolean.valueOf(opRes);
-							}
-							catch (final Exception e)
-							{
-								logger.error("Error trying to reserve quantity: ", e);
-								toRollback.set(true);
-								tempRes[i][0] = nextShard;
-								tempRes[i][1] = reqPerShard;
-								tempRes[i][2] = Boolean.valueOf(false);
-							}
-							countdownLatch1.countDown();
-						}
-					};
-					executorService.submit(r);
-					ind++;
+					final List<Object> converted = (List<Object>) nextToRollback;
+					final JedisCommands curShard = (JedisCommands) converted.get(0);
+					final ReserveStockLevelRequest originalReq = (ReserveStockLevelRequest) converted.get(1);
+					final RollbackStockLevelTask rollbackTask = new RollbackStockLevelTask(taskExecutionStrategy, curShard,
+							originalReq, redisStockOperationTemplate, false, maxSplitSize);
+					rollbackTask.run();
 				}
-				try
-				{
-					countdownLatch1.await();
-				}
-				catch (final InterruptedException e)
-				{
-					logger.warn("Thread execution interruptted");
-				}
-				if (toRollback.get())
-				{
-					logger.warn("Some reservation failed, perform roll back");
-					final CountDownLatch countdownLatch2 = new CountDownLatch(countSuccess.get());
-					for (final Object[] nextPair : tempRes)
-					{
-						final Jedis nextShard = (Jedis) nextPair[0];
-						final ReserveStockLevelRequest reqPerShard = (ReserveStockLevelRequest) nextPair[1];
-						final boolean b = ((Boolean) nextPair[2]).booleanValue();
-						if (b)
-						{
-							final Runnable r = new Runnable()
-							{
-
-								@Override
-								public void run()
-								{
-									if (logger.isDebugEnabled())
-									{
-										logger.debug("Rollback request for shard: " + nextShard + " is: " + reqPerShard);
-									}
-									try
-									{
-										redisStockOperationTemplate.rollbackQuantities(nextShard, reqPerShard);
-									}
-									catch (final Exception e)
-									{
-										logger.error("Error trying to rollback quantity", e);
-									}
-									countdownLatch2.countDown();
-								}
-							};
-							executorService.submit(r);
-						}
-					}
-					try
-					{
-						countdownLatch2.await();
-					}
-					catch (final InterruptedException e)
-					{
-						logger.warn("Thread execution interruptted");
-					}
-				}
-				else {
-					return true;
-				}
-			}
-			else
-			{
-				throw new RuntimeException("Not a sharded jedis");
 			}
 		}
 		finally
@@ -307,7 +228,34 @@ public class ShardedRedisStockManagerImpl implements StockManager
 		return false;
 	}
 
-	@Override
+
+	protected boolean filterRollbackTasks(final List<Object> reserveRes, final List<Object> toRollback)
+	{
+		boolean allSuccess = true;
+		for (final Object nextReserveRes : reserveRes)
+		{
+			final List<Object> converted = (List<Object>) nextReserveRes;
+			final JedisCommands jedis = (JedisCommands) converted.get(0);
+			final ReserveStockLevelRequest originalReq = (ReserveStockLevelRequest) converted.get(1);
+			final Boolean success = (Boolean) converted.get(2);
+			if (!success.booleanValue())
+			{
+				logger.warn("Reservation failed for jedis:" + jedis + " reservation request:" + originalReq);
+				allSuccess = false;
+			}
+			else
+			{
+				toRollback.add(nextReserveRes);
+			}
+		}
+		if (allSuccess)
+		{
+			toRollback.clear();
+		}
+		return !allSuccess;
+	}
+
+	
 	public ReserveStockLevelResponse reservePartialQuantities(final ReserveStockLevelRequest stockLevelReq)
 	{
 		if (logger.isDebugEnabled())
@@ -317,56 +265,9 @@ public class ShardedRedisStockManagerImpl implements StockManager
 		final JedisCommands jedis = jedisDataManager.getJedisByTableName(TABLENAME);
 		try
 		{
-			if (jedis instanceof ShardedJedis)
-			{
-				final ReserveStockLevelResponse finalResp = new ReserveStockLevelResponse();
-				final Map<Jedis, ? extends AbstractStockLevelRequest<Integer>> splitRes = ShardStockUtils.splitRequestByShard(
-						stockLevelReq, (ShardedJedis) jedis);
-				final CountDownLatch countdownLatch = new CountDownLatch(splitRes.size());
-				for (final Jedis nextShard : splitRes.keySet())
-				{
-					final Runnable r = new Runnable()
-					{
-						@Override
-						public void run()
-						{
-							try {
-								final ReserveStockLevelRequest reqPerShard = (ReserveStockLevelRequest) splitRes.get(nextShard);
-								if (logger.isDebugEnabled())
-								{
-									logger.debug("Partial Reserve Stock level request for shard: " + nextShard + " is: " + reqPerShard);
-								}
-								final ReserveStockLevelResponse shardResp = redisStockOperationTemplate.reservePartialQuantities(nextShard,
-										reqPerShard);
-								if (logger.isDebugEnabled())
-								{
-									logger.debug("Partial Reserve Stock level response for shard: " + nextShard + " is: " + shardResp);
-								}
-								finalResp.mergeResponse(shardResp);
-							}
-							catch (final Exception e)
-							{
-								logger.error("Error trying to reserve quantity", e);
-							}
-							countdownLatch.countDown();
-						}
-					};
-					executorService.submit(r);
-				}
-				try
-				{
-					countdownLatch.await();
-				}
-				catch (final InterruptedException e)
-				{
-					logger.warn("Thread execution interruptted");
-				}
-				return finalResp;
-			}
-			else
-			{
-				throw new RuntimeException("Not a sharded jedis");
-			}
+			final ReservePartialQtyTask reservePartialQtyTask = new ReservePartialQtyTask(taskExecutionStrategy, jedis,
+					stockLevelReq, redisStockOperationTemplate, false, maxSplitSize);
+			return reservePartialQtyTask.call();
 		}
 		finally
 		{
@@ -374,7 +275,7 @@ public class ShardedRedisStockManagerImpl implements StockManager
 		}
 	}
 
-	@Override
+	
 	public boolean commitAllQuantities(final CommitStockLevelRequest stockLevelReq)
 	{
 		if (logger.isDebugEnabled())
@@ -384,53 +285,18 @@ public class ShardedRedisStockManagerImpl implements StockManager
 		final JedisCommands jedis = jedisDataManager.getJedisByTableName(TABLENAME);
 		try
 		{
-			if (jedis instanceof ShardedJedis)
-			{
-				final Map<Jedis, ? extends AbstractStockLevelRequest<Integer>> splitRes = ShardStockUtils.splitRequestByShard(
-						stockLevelReq, (ShardedJedis) jedis);
-				final CountDownLatch countdownLatch = new CountDownLatch(splitRes.size());
-				for (final Jedis nextShard : splitRes.keySet())
-				{
-					final Runnable r = new Runnable()
-					{
-						@Override
-						public void run()
-						{
-							try {
-								final CommitStockLevelRequest reqPerShard = (CommitStockLevelRequest) splitRes.get(nextShard);
-								if (logger.isDebugEnabled())
-								{
-									logger.debug("Partial Commit Stock level request for shard: " + nextShard + " is: " + reqPerShard);
-								}
-								redisStockOperationTemplate.commitAllQuantities(nextShard, reqPerShard);
-							}
-							catch (final Exception e)
-							{
-								logger.error("Error trying to commit all quantity", e);
-							}
-							countdownLatch.countDown();
-						}
-					};
-					executorService.submit(r);
-				}
-				try
-				{
-					countdownLatch.await();
-				}
-				catch (final InterruptedException e)
-				{
-					logger.warn("Thread execution interruptted");
-				}
-			}
+			final CommitAllQtyTask commitAllQtyTask = new CommitAllQtyTask(taskExecutionStrategy, jedis, stockLevelReq,
+					redisStockOperationTemplate, false, maxSplitSize);
+			commitAllQtyTask.run();
+			return true;
 		}
 		finally
 		{
 			JedisUtils.closeJedis(jedis);
 		}
-		return false;
 	}
 
-	@Override
+	
 	public CommitStockLevelResponse commitPartitalQuantities(final CommitStockLevelRequest stockLevelReq)
 	{
 		if (logger.isDebugEnabled())
@@ -440,56 +306,9 @@ public class ShardedRedisStockManagerImpl implements StockManager
 		final JedisCommands jedis = jedisDataManager.getJedisByTableName(TABLENAME);
 		try
 		{
-			if (jedis instanceof ShardedJedis)
-			{
-				final CommitStockLevelResponse finalResp = new CommitStockLevelResponse();
-				final Map<Jedis, ? extends AbstractStockLevelRequest<Integer>> splitRes = ShardStockUtils.splitRequestByShard(
-						stockLevelReq, (ShardedJedis) jedis);
-				final CountDownLatch countdownLatch = new CountDownLatch(splitRes.size());
-				for (final Jedis nextShard : splitRes.keySet())
-				{
-					final Runnable r = new Runnable()
-					{
-						@Override
-						public void run()
-						{
-							try {
-								final CommitStockLevelRequest reqPerShard = (CommitStockLevelRequest) splitRes.get(nextShard);
-								if (logger.isDebugEnabled())
-								{
-									logger.debug("Partial Reserve Stock level request for shard: " + nextShard + " is: " + reqPerShard);
-								}
-								final CommitStockLevelResponse shardResp = redisStockOperationTemplate.commitPartialQuantities(nextShard,
-										reqPerShard);
-								if (logger.isDebugEnabled())
-								{
-									logger.debug("Partial Reserve Stock level response for shard: " + nextShard + " is: " + shardResp);
-								}
-								finalResp.mergeResponse(shardResp);
-							}
-							catch (final Exception e)
-							{
-								logger.error("Error trying to commit partial quantity", e);
-							}
-							countdownLatch.countDown();
-						}
-					};
-					executorService.submit(r);
-				}
-				try
-				{
-					countdownLatch.await();
-				}
-				catch (final InterruptedException e)
-				{
-					logger.warn("Thread execution interruptted");
-				}
-				return finalResp;
-			}
-			else
-			{
-				throw new RuntimeException("Not a sharded jedis");
-			}
+			final CommitPartialQtyTask commitPartialQtyTask = new CommitPartialQtyTask(taskExecutionStrategy, jedis, stockLevelReq,
+					redisStockOperationTemplate, false, maxSplitSize);
+			return commitPartialQtyTask.call();
 		}
 		finally
 		{
@@ -497,7 +316,7 @@ public class ShardedRedisStockManagerImpl implements StockManager
 		}
 	}
 
-	@Override
+	
 	public void rollbackQuantities(final RollbackStockLevelRequest stockLevelReq)
 	{
 		if (logger.isDebugEnabled())
@@ -507,44 +326,9 @@ public class ShardedRedisStockManagerImpl implements StockManager
 		final JedisCommands jedis = jedisDataManager.getJedisByTableName(TABLENAME);
 		try
 		{
-			if (jedis instanceof ShardedJedis)
-			{
-				final Map<Jedis, ? extends AbstractStockLevelRequest<Integer>> splitRes = ShardStockUtils.splitRequestByShard(
-						stockLevelReq, (ShardedJedis) jedis);
-				final CountDownLatch countdownLatch = new CountDownLatch(splitRes.size());
-				for (final Jedis nextShard : splitRes.keySet())
-				{
-					final Runnable r = new Runnable()
-					{
-						@Override
-						public void run()
-						{
-							try {
-								final RollbackStockLevelRequest reqPerShard = (RollbackStockLevelRequest) splitRes.get(nextShard);
-								if (logger.isDebugEnabled())
-								{
-									logger.debug("Partial Rollback Stock level request for shard: " + nextShard + " is: " + reqPerShard);
-								}
-								redisStockOperationTemplate.rollbackQuantities(nextShard, reqPerShard);
-							}
-							catch (final Exception e)
-							{
-								logger.error("Error trying to rollback quantity", e);
-							}
-							countdownLatch.countDown();
-						}
-					};
-					executorService.submit(r);
-				}
-				try
-				{
-					countdownLatch.await();
-				}
-				catch (final InterruptedException e)
-				{
-					logger.warn("Thread execution interruptted");
-				}
-			}
+			final RollbackStockLevelTask rollbackStockLevelTask = new RollbackStockLevelTask(taskExecutionStrategy, jedis,
+					stockLevelReq, redisStockOperationTemplate, false, maxSplitSize);
+			rollbackStockLevelTask.run();
 		}
 		finally
 		{
@@ -552,7 +336,7 @@ public class ShardedRedisStockManagerImpl implements StockManager
 		}
 	}
 
-	@Override
+	
 	public GetQuantityResponse getAvailableQuantities(final LocationProducts locProds)
 	{
 		if (logger.isDebugEnabled())
@@ -562,55 +346,9 @@ public class ShardedRedisStockManagerImpl implements StockManager
 		final JedisCommands jedis = jedisDataManager.getJedisByTableName(TABLENAME);
 		try
 		{
-			if (jedis instanceof ShardedJedis)
-			{
-				final GetQuantityResponse finalResp = new GetQuantityResponse();
-				final Map<Jedis, LocationProducts> splitRes = ShardStockUtils.splitLocProdByShard(locProds, (ShardedJedis) jedis);
-				final CountDownLatch countdownLatch = new CountDownLatch(splitRes.size());
-				for (final Jedis nextShard : splitRes.keySet())
-				{
-					final Runnable r = new Runnable()
-					{
-						@Override
-						public void run()
-						{
-							try {
-								final LocationProducts reqPerShard = splitRes.get(nextShard);
-								if (logger.isDebugEnabled())
-								{
-									logger.debug("Partial get quantity request for shard: " + nextShard + " is: " + reqPerShard);
-								}
-								final GetQuantityResponse shardResp = redisStockOperationTemplate.getAvailableQuantities(nextShard,
-										reqPerShard);
-								if (logger.isDebugEnabled())
-								{
-									logger.debug("Partial get quantity response for shard: " + nextShard + " is: " + shardResp);
-								}
-								finalResp.mergeResponse(shardResp);
-							}
-							catch (final Exception e)
-							{
-								logger.error("Error trying to get available quantity", e);
-							}
-							countdownLatch.countDown();
-						}
-					};
-					executorService.submit(r);
-				}
-				try
-				{
-					countdownLatch.await();
-				}
-				catch (final InterruptedException e)
-				{
-					logger.warn("Thread execution interruptted");
-				}
-				return finalResp;
-			}
-			else
-			{
-				throw new RuntimeException("Not a sharded jedis");
-			}
+			final GetAvailableQtyTask getAvailableQtyTask = new GetAvailableQtyTask(taskExecutionStrategy, jedis, locProds,
+					redisStockOperationTemplate, true, maxSplitSize);
+			return getAvailableQtyTask.call();
 		}
 		finally
 		{
@@ -618,7 +356,7 @@ public class ShardedRedisStockManagerImpl implements StockManager
 		}
 	}
 
-	@Override
+	
 	public GetQuantityResponse getInstockQuantities(final LocationProducts locProds)
 	{
 		if (logger.isDebugEnabled())
@@ -628,55 +366,9 @@ public class ShardedRedisStockManagerImpl implements StockManager
 		final JedisCommands jedis = jedisDataManager.getJedisByTableName(TABLENAME);
 		try
 		{
-			if (jedis instanceof ShardedJedis)
-			{
-				final GetQuantityResponse finalResp = new GetQuantityResponse();
-				final Map<Jedis, LocationProducts> splitRes = ShardStockUtils.splitLocProdByShard(locProds, (ShardedJedis) jedis);
-				final CountDownLatch countdownLatch = new CountDownLatch(splitRes.size());
-				for (final Jedis nextShard : splitRes.keySet())
-				{
-					final Runnable r = new Runnable()
-					{
-						@Override
-						public void run()
-						{
-							try {
-								final LocationProducts reqPerShard = splitRes.get(nextShard);
-								if (logger.isDebugEnabled())
-								{
-									logger.debug("Partial get quantity request for shard: " + nextShard + " is: " + reqPerShard);
-								}
-								final GetQuantityResponse shardResp = redisStockOperationTemplate.getInstockQuantities(nextShard,
-										reqPerShard);
-								if (logger.isDebugEnabled())
-								{
-									logger.debug("Partial get quantity response for shard: " + nextShard + " is: " + shardResp);
-								}
-								finalResp.mergeResponse(shardResp);
-							}
-							catch (final Exception e)
-							{
-								logger.error("Error trying to get instock quantity", e);
-							}
-							countdownLatch.countDown();
-						}
-					};
-					executorService.submit(r);
-				}
-				try
-				{
-					countdownLatch.await();
-				}
-				catch (final InterruptedException e)
-				{
-					logger.warn("Thread execution interruptted");
-				}
-				return finalResp;
-			}
-			else
-			{
-				throw new RuntimeException("Not a sharded jedis");
-			}
+			final GetInstockQtyTask getInstockQtyTask = new GetInstockQtyTask(taskExecutionStrategy, jedis, locProds,
+					redisStockOperationTemplate, true, maxSplitSize);
+			return getInstockQtyTask.call();
 		}
 		finally
 		{
@@ -684,7 +376,7 @@ public class ShardedRedisStockManagerImpl implements StockManager
 		}
 	}
 
-	@Override
+	
 	public GetQuantityResponse getReservedQuantities(final LocationProducts locProds)
 	{
 		if (logger.isDebugEnabled())
@@ -694,55 +386,9 @@ public class ShardedRedisStockManagerImpl implements StockManager
 		final JedisCommands jedis = jedisDataManager.getJedisByTableName(TABLENAME);
 		try
 		{
-			if (jedis instanceof ShardedJedis)
-			{
-				final GetQuantityResponse finalResp = new GetQuantityResponse();
-				final Map<Jedis, LocationProducts> splitRes = ShardStockUtils.splitLocProdByShard(locProds, (ShardedJedis) jedis);
-				final CountDownLatch countdownLatch = new CountDownLatch(splitRes.size());
-				for (final Jedis nextShard : splitRes.keySet())
-				{
-					final Runnable r = new Runnable()
-					{
-						@Override
-						public void run()
-						{
-							try {
-								final LocationProducts reqPerShard = splitRes.get(nextShard);
-								if (logger.isDebugEnabled())
-								{
-									logger.debug("Partial get quantity request for shard: " + nextShard + " is: " + reqPerShard);
-								}
-								final GetQuantityResponse shardResp = redisStockOperationTemplate.getReservedQuantities(nextShard,
-										reqPerShard);
-								if (logger.isDebugEnabled())
-								{
-									logger.debug("Partial get quantity response for shard: " + nextShard + " is: " + shardResp);
-								}
-								finalResp.mergeResponse(shardResp);
-							}
-							catch (final Exception e)
-							{
-								logger.error("Error trying to get reserved quantity", e);
-							}
-							countdownLatch.countDown();
-						}
-					};
-					executorService.submit(r);
-				}
-				try
-				{
-					countdownLatch.await();
-				}
-				catch (final InterruptedException e)
-				{
-					logger.warn("Thread execution interruptted");
-				}
-				return finalResp;
-			}
-			else
-			{
-				throw new RuntimeException("Not a sharded jedis");
-			}
+			final GetReservedQtyTask getReservedQtyTask = new GetReservedQtyTask(taskExecutionStrategy, jedis, locProds,
+					redisStockOperationTemplate, true, maxSplitSize);
+			return getReservedQtyTask.call();
 		}
 		finally
 		{
@@ -750,7 +396,28 @@ public class ShardedRedisStockManagerImpl implements StockManager
 		}
 	}
 
-	@Override
+
+	
+	public MultiGetQuantityResponse getAllQuantities(final LocationProducts locProds)
+	{
+		if (logger.isDebugEnabled())
+		{
+			logger.debug("Get all quantity request is: " + locProds);
+		}
+		final JedisCommands jedis = jedisDataManager.getJedisByTableName(TABLENAME);
+		try
+		{
+			final GetAllQtyTask getAllQtyTask = new GetAllQtyTask(taskExecutionStrategy, jedis, locProds,
+					redisStockOperationTemplate, true, maxSplitSize);
+			return getAllQtyTask.call();
+		}
+		finally
+		{
+			JedisUtils.closeJedis(jedis);
+		}
+	}
+
+	
 	public int getInstockQuantity(final String locationId, final String prodCode)
 	{
 		if (logger.isDebugEnabled())
@@ -775,7 +442,7 @@ public class ShardedRedisStockManagerImpl implements StockManager
 		}
 	}
 
-	@Override
+	
 	public int getReservedQuantity(final String locationId, final String prodCode)
 	{
 		if (logger.isDebugEnabled())
@@ -800,7 +467,7 @@ public class ShardedRedisStockManagerImpl implements StockManager
 		}
 	}
 
-	@Override
+	
 	public int getAvailableQuantity(final String locationId, final String prodCode)
 	{
 		if (logger.isDebugEnabled())
@@ -824,4 +491,31 @@ public class ShardedRedisStockManagerImpl implements StockManager
 			JedisUtils.closeJedis(jedis);
 		}
 	}
+
+
+	
+	public int[] getAllQuantities(final String locationId, final String prodCode)
+	{
+		if (logger.isDebugEnabled())
+		{
+			logger.debug("Get all quantity request, location id: " + locationId + " product code: " + prodCode);
+		}
+		final JedisCommands jedis = jedisDataManager.getJedisByTableName(TABLENAME);
+		try
+		{
+			if (jedis instanceof ShardedJedis)
+			{
+				return redisStockOperationTemplate.getAllQuantity(jedis, locationId, prodCode);
+			}
+			else
+			{
+				throw new RuntimeException("Not a simple jedis");
+			}
+		}
+		finally
+		{
+			JedisUtils.closeJedis(jedis);
+		}
+	}
+
 }

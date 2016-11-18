@@ -20,10 +20,12 @@ import org.wispersd.ordermanagement.sourcing.stock.CommitStockLevelRequest;
 import org.wispersd.ordermanagement.sourcing.stock.CommitStockLevelResponse;
 import org.wispersd.ordermanagement.sourcing.stock.GetQuantityResponse;
 import org.wispersd.ordermanagement.sourcing.stock.LocationProducts;
+import org.wispersd.ordermanagement.sourcing.stock.MultiGetQuantityResponse;
 import org.wispersd.ordermanagement.sourcing.stock.ReserveStockLevelRequest;
 import org.wispersd.ordermanagement.sourcing.stock.ReserveStockLevelResponse;
 import org.wispersd.ordermanagement.sourcing.stock.RollbackStockLevelRequest;
 import org.wispersd.ordermanagement.sourcing.stock.StockManager;
+import org.wispersd.ordermanagement.sourcing.stock.UpdateStockLevelRequest;
 
 import redis.clients.jedis.Jedis;
 import redis.clients.jedis.JedisCommands;
@@ -75,7 +77,7 @@ public class RedisStockManagerImpl implements StockManager
 		this.redisStockOperationTemplate = redisStockOperationTemplate;
 	}
 
-	@Override
+	
 	public void clearAllStockData()
 	{
 		final JedisCommands jedis = jedisDataManager.getJedisByTableName(TABLENAME);
@@ -93,7 +95,7 @@ public class RedisStockManagerImpl implements StockManager
 		}
 	}
 
-	@Override
+	
 	public void addStockLevelData(final AddStockLevelRequest stockLevelReq)
 	{
 		if (logger.isDebugEnabled())
@@ -120,7 +122,7 @@ public class RedisStockManagerImpl implements StockManager
 
 
 
-	@Override
+	
 	public void updateStockLevelData(final UpdateStockLevelRequest stockLevelReq)
 	{
 		if (logger.isDebugEnabled())
@@ -147,7 +149,7 @@ public class RedisStockManagerImpl implements StockManager
 
 
 
-	@Override
+	
 	public boolean reserveAllQuantities(final ReserveStockLevelRequest stockLevelReq)
 	{
 		if (logger.isDebugEnabled())
@@ -173,7 +175,7 @@ public class RedisStockManagerImpl implements StockManager
 	}
 
 
-	@Override
+	
 	public ReserveStockLevelResponse reservePartialQuantities(final ReserveStockLevelRequest stockLevelReq)
 	{
 		if (logger.isDebugEnabled())
@@ -199,7 +201,7 @@ public class RedisStockManagerImpl implements StockManager
 	}
 
 
-	@Override
+	
 	public boolean commitAllQuantities(final CommitStockLevelRequest stockLevelReq)
 	{
 		if (logger.isDebugEnabled())
@@ -224,7 +226,7 @@ public class RedisStockManagerImpl implements StockManager
 		}
 	}
 
-	@Override
+	
 	public CommitStockLevelResponse commitPartitalQuantities(final CommitStockLevelRequest stockLevelReq)
 	{
 		if (logger.isDebugEnabled())
@@ -249,7 +251,7 @@ public class RedisStockManagerImpl implements StockManager
 		}
 	}
 
-	@Override
+	
 	public void rollbackQuantities(final RollbackStockLevelRequest stockLevelReq)
 	{
 		if (logger.isDebugEnabled())
@@ -274,7 +276,7 @@ public class RedisStockManagerImpl implements StockManager
 		}
 	}
 
-	@Override
+	
 	public GetQuantityResponse getInstockQuantities(final LocationProducts locProds)
 	{
 		if (logger.isDebugEnabled())
@@ -299,7 +301,7 @@ public class RedisStockManagerImpl implements StockManager
 		}
 	}
 
-	@Override
+	
 	public GetQuantityResponse getReservedQuantities(final LocationProducts locProds)
 	{
 		if (logger.isDebugEnabled())
@@ -325,7 +327,7 @@ public class RedisStockManagerImpl implements StockManager
 	}
 
 
-	@Override
+	
 	public GetQuantityResponse getAvailableQuantities(final LocationProducts locProds)
 	{
 		if (logger.isDebugEnabled())
@@ -350,7 +352,7 @@ public class RedisStockManagerImpl implements StockManager
 		}
 	}
 
-	@Override
+	
 	public int getInstockQuantity(final String locationId, final String prodCode)
 	{
 		if (logger.isDebugEnabled())
@@ -375,7 +377,7 @@ public class RedisStockManagerImpl implements StockManager
 		}
 	}
 
-	@Override
+	
 	public int getReservedQuantity(final String locationId, final String prodCode)
 	{
 		if (logger.isDebugEnabled())
@@ -400,7 +402,7 @@ public class RedisStockManagerImpl implements StockManager
 		}
 	}
 
-	@Override
+	
 	public int getAvailableQuantity(final String locationId, final String prodCode)
 	{
 		if (logger.isDebugEnabled())
@@ -425,7 +427,7 @@ public class RedisStockManagerImpl implements StockManager
 		}
 	}
 
-	@Override
+	
 	public MultiGetQuantityResponse getAllQuantities(final LocationProducts locProds)
 	{
 		if (logger.isDebugEnabled())
@@ -450,7 +452,7 @@ public class RedisStockManagerImpl implements StockManager
 		}
 	}
 
-	@Override
+	
 	public int[] getAllQuantities(final String locationId, final String prodCode)
 	{
 		if (logger.isDebugEnabled())

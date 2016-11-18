@@ -27,6 +27,21 @@ public class AbstractStockLevelResponse<T>
 {
 	private final ConcurrentMap<String, Map<String, T>> respMap = new ConcurrentHashMap<String, Map<String, T>>();
 
+	public int size()
+	{
+		return respMap.size();
+	}
+
+	public boolean isEmpty()
+	{
+		return respMap.isEmpty();
+	}
+
+	public void clear()
+	{
+		respMap.clear();
+	}
+
 	public void addStockLevel(final String locationId, final String prodCode, final T data)
 	{
 		Map<String, T> prodValMap = respMap.get(locationId);

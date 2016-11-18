@@ -11,8 +11,11 @@
  */
 package org.wispersd.ordermanagement.sourcing.stock;
 
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.Iterator;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -53,6 +56,37 @@ public class ShardStockUtils
 	}
 
 
+	public static <T> List<? extends AbstractStockLevelRequest<T>> splitRequestBySize(final AbstractStockLevelRequest<T> original,
+			final int splitSize) throws Exception
+	{
+		if (original.isEmpty())
+		{
+			return Collections.singletonList(original);
+		}
+		final List<AbstractStockLevelRequest<T>> result = new ArrayList<AbstractStockLevelRequest<T>>();
+		final Iterator<StockRow<T>> stockRowIter = original.getStockRowIterator();
+		int count = 0;
+		AbstractStockLevelRequest<T> req = original.getClass().newInstance();
+		while (stockRowIter.hasNext())
+		{
+			final StockRow<T> nextStockRow = stockRowIter.next();
+			req.addStockLevel(nextStockRow.getLocationId(), nextStockRow.getProdCode(), nextStockRow.getValue());
+			count++;
+			if (count == splitSize)
+			{
+				result.add(req);
+				req = original.getClass().newInstance();
+				count = 0;
+			}
+		}
+		if (count > 0)
+		{
+			result.add(req);
+		}
+		return result;
+	}
+
+
 	public static Map<Jedis, LocationProducts> splitLocProdByShard(final LocationProducts locProds, final ShardedJedis shardedJedis)
 	{
 		final Set<String> allLocs = locProds.getAllLocations();
@@ -70,5 +104,34 @@ public class ShardStockUtils
 			locProdCurShard.addProductsForLocation(nextLoc, prodsForLoc);
 		}
 		return splitReqMap;
+	}
+
+
+	public static List<LocationProducts> splitLocProdBySize(final LocationProducts locProds, final int splitSize)
+	{
+		final Set<String> allLocs = locProds.getAllLocations();
+		int count = 0;
+		final List<LocationProducts> result = new ArrayList<LocationProducts>();
+		LocationProducts curLocProd = new LocationProducts();
+		for (final String nextLoc : allLocs)
+		{
+			final Set<String> prodsForLoc = locProds.getProductsForLocation(nextLoc);
+			for (final String nextProd : prodsForLoc)
+			{
+				curLocProd.addProductForLocation(nextLoc, nextProd);
+				count++;
+				if (count == splitSize)
+				{
+					result.add(curLocProd);
+					curLocProd = new LocationProducts();
+					count = 0;
+				}
+			}
+		}
+		if (count > 0)
+		{
+			result.add(curLocProd);
+		}
+		return result;
 	}
 }

@@ -66,6 +66,10 @@ public class LocationProducts
 		products.addAll(prodCodes);
 	}
 
+	public int size()
+	{
+		return params.size();
+	}
 
 	@Override
 	public String toString()
